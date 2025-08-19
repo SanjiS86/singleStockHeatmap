@@ -26,3 +26,6 @@ This single-file web app lets anyone build a price target heatmap for any stock 
 </details>
 
 ---
+
+## 💻 Check my [**Investor Portal**](https://www.stocks2buynow.com)
+for stock market-related educational articles, ideas, and useful apps for equity investors 

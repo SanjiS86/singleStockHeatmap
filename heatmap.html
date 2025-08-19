@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Price Target Heatmap — FMP</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      --bg:#0f1222; --card:#161a2b; --grid:#232845; --text:#e8ebff; --muted:#9aa3c7; --accent:#7aa2ff;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+    .wrap{max-width:1100px;margin:32px auto;padding:0 16px}
+    h1,h2{margin:.2rem 0 1rem}
+    .card{background:var(--card);border:1px solid var(--grid);border-radius:14px;padding:16px;margin:16px 0;box-shadow:0 2px 14px rgba(0,0,0,.24)}
+    .row{display:grid;gap:16px}
+    @media(min-width:960px){.row{grid-template-columns:1fr 1fr}}
+    label{display:block;font-weight:600;margin:0 0 6px;color:var(--muted)}
+    input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--grid);background:#0e1330;color:var(--text)}
+    .grid2{display:grid;gap:12px}
+    @media(min-width:720px){.grid2{grid-template-columns:1fr 2fr .7fr}}
+    button{padding:10px 14px;border-radius:10px;border:1px solid var(--grid);background:var(--accent);color:#06102e;font-weight:700;cursor:pointer}
+    button[disabled]{opacity:.6;cursor:not-allowed}
+    .small{font-size:12px;color:var(--muted)}
+    table.hm{width:100%;border-collapse:separate;border-spacing:4px;table-layout:fixed}
+    table.hm th,table.hm td{padding:10px;border-radius:8px;text-align:center}
+    table.hm th{background:#11152b;color:var(--muted);border:1px solid var(--grid)}
+    .legend{display:flex;gap:8px;align-items:center;margin-top:.5rem}
+    .sw{width:20px;height:10px;border-radius:3px;border:1px solid var(--grid)}
+    .note{margin-top:8px;color:var(--muted)}
+    .err{color:#ff6a6a}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--grid);background:#11152b;color:var(--muted);font-size:12px}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Single-Stock <span class="pill">Price Target Heatmap</span></h1>
+
+  <div class="card">
+    <div class="grid2" style="align-items:end">
+      <div>
+        <label for="ticker">Ticker</label>
+        <input id="ticker" value="AAPL" placeholder="e.g., AAPL, MSFT, NVDA" />
+      </div>
+      <div>
+        <label for="apikey">FMP API Key</label>
+        <input id="apikey" placeholder="your FMP API key" />
+      </div>
+      <div>
+        <button id="run">Build Heatmap</button>
+        <div id="stamp" class="small"></div>
+      </div>
+    </div>
+    <div class="note small">Uses FMP endpoints: <b>Price Target News</b> · <b>Financial Estimates</b>. No libraries required.</div>
+    <div id="err" class="small err"></div>
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <h2>Analyst Price Targets — Heatmap</h2>
+      <div id="targetsHM"></div>
+      <div class="legend small">
+        <span class="sw" style="background:hsl(220,80%,35%)"></span> Low
+        <span class="sw" style="background:hsl(0,0%,60%)"></span> Mid
+        <span class="sw" style="background:hsl(0,80%,55%)"></span> High
+      </div>
+      <div id="targetsStats" class="note small"></div>
+    </div>
+
+    <div class="card">
+      <h2>Financial Estimates — Heatmap</h2>
+      <div id="estHM"></div>
+      <div class="legend small">
+        <span class="sw" style="background:hsl(220,80%,35%)"></span> Low
+        <span class="sw" style="background:hsl(0,0%,60%)"></span> Mid
+        <span class="sw" style="background:hsl(0,80%,55%)"></span> High
+      </div>
+      <div class="note small">Rows: EPS / Revenue (B). Columns: Forward years from FMP <b>analyst-estimates</b>.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = sel => document.querySelector(sel);
+
+function colorScale(val, min, max){
+  if (!isFinite(val) || min === max) return "hsl(0,0%,50%)";
+  const t = (val - min) / (max - min);              
+  const hue = (1 - t) * 220;                         
+  const light = 30 + t * 25;                         
+  return `hsl(${hue},80%,${light}%)`;
+}
+
+function renderHeatmap(container, rowLabels, colLabels, matrix, isRevenue=false){
+  const table = document.createElement("table");
+  table.className = "hm";
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+  trh.appendChild(cell("th",""));
+  colLabels.forEach(c => trh.appendChild(cell("th", String(c))));
+  thead.appendChild(trh);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  for (let r=0; r<matrix.length; r++){
+    const row = document.createElement("tr");
+    row.appendChild(cell("th", rowLabels[r]));
+    
+    const vals = matrix[r].filter(x => isFinite(x));
+    const min = Math.min(...vals), max = Math.max(...vals);
+    for (let c=0; c<matrix[r].length; c++){
+      const v = matrix[r][c];
+      const td = cell("td", isRevenue ? fmt(v,2) : fmt(v,2));
+      td.style.background = colorScale(v, min, max);
+      row.appendChild(td);
+    }
+    tbody.appendChild(row);
+  }
+  table.appendChild(tbody);
+  container.innerHTML = "";
+  container.appendChild(table);
+}
+
+function cell(tag, txt){
+  const el = document.createElement(tag);
+  el.textContent = txt;
+  return el;
+}
+const fmt = (n, d=2) => (n==null || !isFinite(n)) ? "—" : Number(n).toLocaleString(undefined, {maximumFractionDigits:d});
+
+
+const mean = arr => arr.reduce((a,b)=>a+b,0)/arr.length;
+const std  = arr => {
+  const m = mean(arr);
+  return Math.sqrt(arr.reduce((a,b)=>a+(b-m)*(b-m),0)/arr.length);
+};
+
+
+async function fetchTargets(symbol, key, limit=10){
+  const url = `https://financialmodelingprep.com/stable/price-target-news?symbol=${encodeURIComponent(symbol)}&page=0&limit=${limit}&apikey=${encodeURIComponent(key)}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error("Price Target News API error");
+  return r.json();
+}
+async function fetchEstimates(symbol, key, limit=5){
+  const url = `https://financialmodelingprep.com/stable/analyst-estimates?symbol=${encodeURIComponent(symbol)}&period=annual&page=0&limit=${limit}&apikey=${encodeURIComponent(key)}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error("Financial Estimates API error");
+  return r.json();
+}
+
+$("#run").addEventListener("click", async () => {
+  $("#err").textContent = "";
+  const symbol = $("#ticker").value.trim().toUpperCase();
+  const key = $("#apikey").value.trim();
+  if (!symbol || !key){
+    $("#err").textContent = "Please enter both a ticker and your FMP API key.";
+    return;
+  }
+  $("#run").disabled = true; $("#run").textContent = "Loading…";
+
+  try{
+    
+    const [ptRaw, estRaw] = await Promise.all([
+      fetchTargets(symbol, key, 12),
+      fetchEstimates(symbol, key, 6)
+    ]);
+
+    const targets = (ptRaw||[])
+      .map(r => Number(r.priceTarget))
+      .filter(v => Number.isFinite(v));
+    if (targets.length === 0){
+      $("#targetsHM").textContent = "No analyst target data.";
+      $("#targetsStats").textContent = "";
+    } else {
+      const cols = targets.map((_,i)=>`T${i+1}`);
+      renderHeatmap($("#targetsHM"), ["Price Target ($)"], cols, [targets]);
+      const min = Math.min(...targets), max = Math.max(...targets), avg = mean(targets), sd = std(targets);
+      $("#targetsStats").innerHTML = `Min <b>$${fmt(min,2)}</b> · Avg <b>$${fmt(avg,2)}</b> · Max <b>$${fmt(max,2)}</b> · StdDev <b>$${fmt(sd,2)}</b> · Range <b>$${fmt(max-min,2)}</b>`;
+    }
+
+    const est = (estRaw||[])
+      .filter(r => r && r.date)
+      .sort((a,b)=>a.date.localeCompare(b.date))
+      .slice(0,4);
+
+    if (est.length === 0){
+      $("#estHM").textContent = "No estimates data.";
+    } else {
+      const years = est.map(r => r.date.slice(0,4));
+      const epsAvg = est.map(r => Number(r.epsAvg));
+      const revAvgB = est.map(r => Number(r.revenueAvg)/1e9); 
+      const matrix = [epsAvg, revAvgB];
+      renderHeatmap($("#estHM"), ["EPS Avg", "Revenue Avg (B)"], years, matrix, true);
+    }
+
+    $("#stamp").textContent = `Last updated: ${new Date().toLocaleString()}`;
+  } catch(err){
+    console.error(err);
+    $("#err").textContent = `Error: ${err.message}`;
+  } finally {
+    $("#run").disabled = false; $("#run").textContent = "Build Heatmap";
+  }
+});
+</script>
+</body>
+</html>
